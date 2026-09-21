@@ -1,0 +1,320 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipStatus {
+  MEMBER
+  NON_MEMBER
+  NEW_COMER
+}
+
+enum VolunteerRole {
+  SUPER_ADMIN
+  ADMIN
+  DEPARTMENT_HEAD
+  SECTION_LEADER
+  VOLUNTEER
+}
+
+enum UserType {
+  SUPER_ADMIN
+  PLATFORM_ADMIN
+  CAMPUS_COORDINATOR
+  DEPARTMENT_MANAGER
+  SECTION_COORDINATOR
+  SCANNER_OPERATOR
+  ACCESS_MANAGER
+  REPORT_VIEWER
+  VOLUNTEER_PORTAL
+}
+
+enum Availability {
+  SUNDAY
+  THURSDAY
+  BOTH
+}
+
+enum EventType {
+  REHEARSAL
+  SUNDAY
+  SPECIAL
+}
+
+enum SundayService {
+  AM1
+  AM2
+  PM
+  NONE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  DUPLICATE
+  DENIED
+}
+
+enum AccessStatus {
+  GRANTED
+  DENIED
+}
+
+model User {
+  id               String              @id @default(cuid())
+  name             String
+  email            String              @unique
+  emailVerified    Boolean             @default(false)
+  image            String?
+  passwordHash     String?
+  role             VolunteerRole
+  userType         UserType            @default(PLATFORM_ADMIN)
+  volunteerId      String?             @unique
+  volunteer        Volunteer?          @relation(fields: [volunteerId], references: [id])
+  campusId         String?
+  campus           Campus?             @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  campusIds        String[]            @default([])
+  departmentId     String?
+  department       Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  departmentIds    String[]            @default([])
+  subDepartmentId  String?
+  subDepartment    SubDepartment?      @relation(fields: [subDepartmentId], references: [id], onDelete: SetNull)
+  subDepartmentIds String[]            @default([])
+  sectionId        String?
+  section          Section?            @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  sectionIds       String[]            @default([])
+  pageAccess       String[]            @default([])
+  actionAccess     String[]            @default([])
+  accounts         Account[]
+  passkeys         PasskeyCredential[]
+  sessions         Session[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+}
+
+model PasskeyCredential {
+  id           String    @id @default(cuid())
+  credentialId String    @unique
+  publicKey    String
+  counter      Int
+  transports   String[]  @default([])
+  deviceType   String?
+  backedUp     Boolean   @default(false)
+  name         String?
+  lastUsedAt   DateTime?
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  issuer                String
+
+  @@unique([issuer, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  detail    String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Campus {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  city         String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  departments  Department[]
+  events       Event[]
+  accessPoints AccessPoint[]
+  users        User[]
+}
+
+model Department {
+  id             String             @id @default(cuid())
+  name           String
+  campusId       String
+  campus         Campus             @relation(fields: [campusId], references: [id], onDelete: Cascade)
+  subDepartments SubDepartment[]
+  permissions    AccessPermission[]
+  users          User[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([campusId, name])
+}
+
+model SubDepartment {
+  id           String             @id @default(cuid())
+  name         String
+  departmentId String
+  department   Department         @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  sections     Section[]
+  permissions  AccessPermission[]
+  users        User[]
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@unique([departmentId, name])
+}
+
+model Section {
+  id              String             @id @default(cuid())
+  name            String
+  subDepartmentId String
+  subDepartment   SubDepartment      @relation(fields: [subDepartmentId], references: [id], onDelete: Cascade)
+  volunteers      Volunteer[]
+  permissions     AccessPermission[]
+  users           User[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([subDepartmentId, name])
+}
+
+model Volunteer {
+  id                    String           @id @default(cuid())
+  fullName              String
+  phone                 String
+  email                 String?          @unique
+  membershipStatus      MembershipStatus
+  role                  VolunteerRole
+  availability          Availability
+  sectionId             String
+  sectionIds            String[]         @default([])
+  section               Section          @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  qrToken               String           @unique
+  notes                 String?
+  pastor                String?
+  zone                  String?
+  campusPhysicalAddress String?
+  photoDataUrl          String?
+  accessPointIds        String[]         @default([])
+  user                  User?
+  attendances           Attendance[]
+  accessLogs            AccessLog[]
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+}
+
+model Event {
+  id             String        @id @default(cuid())
+  name           String
+  date           DateTime
+  type           EventType
+  sundayService  SundayService @default(NONE)
+  startTime      String
+  endTime        String
+  campusId       String
+  campus         Campus        @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  allowDuplicate Boolean       @default(false)
+  isRecurring    Boolean       @default(false)
+  recurringDays  String[]
+  attendances    Attendance[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model Attendance {
+  id          String           @id @default(cuid())
+  volunteerId String
+  volunteer   Volunteer        @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  eventId     String
+  event       Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  status      AttendanceStatus @default(PRESENT)
+  scannedAt   DateTime         @default(now())
+
+  @@unique([volunteerId, eventId, status])
+  @@index([eventId, scannedAt])
+}
+
+model AccessPoint {
+  id          String             @id @default(cuid())
+  name        String
+  location    String
+  campusId    String?
+  campus      Campus?            @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  color       String             @default("#22c55e")
+  isActive    Boolean            @default(true)
+  permissions AccessPermission[]
+  accessLogs  AccessLog[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model AccessPermission {
+  id                   String         @id @default(cuid())
+  accessPointId        String
+  accessPoint          AccessPoint    @relation(fields: [accessPointId], references: [id], onDelete: Cascade)
+  departmentId         String?
+  department           Department?    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  subDepartmentId      String?
+  subDepartment        SubDepartment? @relation(fields: [subDepartmentId], references: [id], onDelete: Cascade)
+  sectionId            String?
+  section              Section?       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  role                 VolunteerRole?
+  excludedVolunteerIds String[]       @default([])
+  createdAt            DateTime       @default(now())
+}
+
+model AccessLog {
+  id            String       @id @default(cuid())
+  volunteerId   String
+  volunteer     Volunteer    @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  accessPointId String
+  accessPoint   AccessPoint  @relation(fields: [accessPointId], references: [id], onDelete: Cascade)
+  status        AccessStatus
+  scannedAt     DateTime     @default(now())
+
+  @@index([accessPointId, scannedAt])
+}
