@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   return new NextResponse(new Uint8Array(png), {
     headers: {
       "Content-Type": "image/png",
-      "Cache-Control": "no-store",
+      "Cache-Control": "public, max-age=86400, immutable",
     },
   });
 }

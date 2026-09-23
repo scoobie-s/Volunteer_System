@@ -6,7 +6,9 @@ import { hasActionAccess } from "@/lib/permissions";
 
 export default async function ReportsPage() {
   const currentUser = await requirePageAccess("Reports");
-  const snapshot = await getScopedSnapshot(currentUser);
+  const snapshot = await getScopedSnapshot(currentUser, {
+    collections: ["campuses", "departments", "subDepartments", "sections", "volunteers", "events", "attendances", "accessPoints", "accessLogs"],
+  });
   return (
     <>
       <ModulePageHeader

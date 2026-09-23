@@ -20,8 +20,12 @@ import type { Snapshot } from "@/lib/data";
 import { formatEnum } from "@/lib/utils";
 import type { Campus, UserAccount, Volunteer } from "@/lib/types";
 
-type VolunteerWithQr = Volunteer & { qrDataUrl: string };
+type VolunteerWithQr = Volunteer & { qrDataUrl?: string };
 const VOLUNTEERS_PER_PAGE = 15;
+
+function getVolunteerQrUrl(volunteer: VolunteerWithQr) {
+  return volunteer.qrDataUrl ?? `/api/qr?token=${encodeURIComponent(volunteer.qrToken)}`;
+}
 
 function readApiError(raw: string, fallback: string) {
   if (!raw) {
@@ -177,10 +181,10 @@ function VolunteerProfileModal({
           </div>
         </dl>
         <div className="mt-5 flex flex-wrap items-center gap-5 rounded-[20px] border border-slate-200 bg-white p-5">
-          <Image src={volunteer.qrDataUrl} alt={`QR code for ${volunteer.fullName}`} width={128} height={128} unoptimized />
+          <Image src={getVolunteerQrUrl(volunteer)} alt={`QR code for ${volunteer.fullName}`} width={128} height={128} unoptimized />
           <div className="min-w-0 flex-1">
             <p className="break-all font-mono text-xs text-slate-500">{volunteer.qrToken}</p>
-            <a href={volunteer.qrDataUrl} download={`${volunteer.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`} className="mt-3 inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm text-white">
+            <a href={getVolunteerQrUrl(volunteer)} download={`${volunteer.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`} className="mt-3 inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm text-white">
               <Download className="h-4 w-4" /> Download QR
             </a>
           </div>
@@ -247,10 +251,12 @@ function CreateModal({
 export function VolunteersPageClient({
   snapshot,
   volunteers,
+  totalVolunteers,
   canExport,
 }: {
   snapshot: Snapshot;
   volunteers: VolunteerWithQr[];
+  totalVolunteers: number;
   canExport: boolean;
 }) {
   const router = useRouter();
@@ -260,6 +266,9 @@ export function VolunteersPageClient({
   const [pendingDelete, setPendingDelete] = useState<VolunteerWithQr | null>(null);
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [loadedVolunteers, setLoadedVolunteers] = useState(volunteers);
+  const [totalVolunteerCount, setTotalVolunteerCount] = useState(totalVolunteers);
+  const [isPageLoading, setIsPageLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
@@ -280,13 +289,55 @@ export function VolunteersPageClient({
     photoDataUrl: "",
   });
 
+  useEffect(() => {
+    if (currentPage === 1 && !search.trim()) {
+      setLoadedVolunteers(volunteers);
+      setTotalVolunteerCount(totalVolunteers);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsPageLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(currentPage),
+          pageSize: String(VOLUNTEERS_PER_PAGE),
+        });
+        if (search.trim()) params.set("search", search.trim());
+        const response = await fetch(`/api/volunteers?${params.toString()}`, {
+          signal: controller.signal,
+          credentials: "same-origin",
+        });
+        if (!response.ok) throw new Error("Unable to load volunteers.");
+        const payload = (await response.json()) as {
+          items: VolunteerWithQr[];
+          total: number;
+        };
+        setLoadedVolunteers(payload.items);
+        setTotalVolunteerCount(payload.total);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setError("Unable to load volunteers.");
+        }
+      } finally {
+        setIsPageLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [currentPage, search, totalVolunteers, volunteers]);
+
   const filteredVolunteers = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) {
-      return volunteers;
+      return loadedVolunteers;
     }
 
-    return volunteers.filter((volunteer) => {
+    return loadedVolunteers.filter((volunteer) => {
       const structure = getVolunteerStructure(snapshot, volunteer);
 
       return [
@@ -302,7 +353,7 @@ export function VolunteersPageClient({
         .toLowerCase()
         .includes(term);
     });
-  }, [search, snapshot, volunteers]);
+  }, [loadedVolunteers, search, snapshot]);
 
   const availableDepartments = useMemo(
     () => snapshot.departments.filter((department) => department.campusId === form.campusId),
@@ -317,12 +368,9 @@ export function VolunteersPageClient({
     () => snapshot.sections.filter((section) => form.subDepartmentIds.includes(section.subDepartmentId)),
     [form.subDepartmentIds, snapshot.sections],
   );
-  const totalPages = Math.max(1, Math.ceil(filteredVolunteers.length / VOLUNTEERS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(totalVolunteerCount / VOLUNTEERS_PER_PAGE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedVolunteers = useMemo(() => {
-    const start = (safeCurrentPage - 1) * VOLUNTEERS_PER_PAGE;
-    return filteredVolunteers.slice(start, start + VOLUNTEERS_PER_PAGE);
-  }, [filteredVolunteers, safeCurrentPage]);
+  const paginatedVolunteers = filteredVolunteers;
 
   function resetForm() {
     const nextCampusId = snapshot.departments[0]?.campusId ?? snapshot.campuses[0]?.id ?? "";
@@ -657,7 +705,7 @@ export function VolunteersPageClient({
                           {volunteer.qrToken}
                         </p>
                         <a
-                          href={volunteer.qrDataUrl}
+                          href={getVolunteerQrUrl(volunteer)}
                           download={`${volunteer.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`}
                           className="inline-flex h-10 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-medium text-white transition hover:bg-slate-800"
                         >
@@ -696,11 +744,11 @@ export function VolunteersPageClient({
           <div className="px-5 py-8 text-sm text-slate-500">
             No volunteers matched your search.
           </div>
-        ) : filteredVolunteers.length > VOLUNTEERS_PER_PAGE ? (
+        ) : totalVolunteerCount > VOLUNTEERS_PER_PAGE ? (
           <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600">
             <p>
               Showing {(safeCurrentPage - 1) * VOLUNTEERS_PER_PAGE + 1}-
-              {Math.min(safeCurrentPage * VOLUNTEERS_PER_PAGE, filteredVolunteers.length)} of {filteredVolunteers.length}
+              {Math.min(safeCurrentPage * VOLUNTEERS_PER_PAGE, totalVolunteerCount)} of {totalVolunteerCount}
             </p>
             <div className="flex items-center gap-2">
               <button
@@ -711,6 +759,7 @@ export function VolunteersPageClient({
               >
                 Previous
               </button>
+              {isPageLoading ? <span className="text-xs text-slate-400">Loading…</span> : null}
               <span className="min-w-[72px] text-center font-medium text-slate-700">
                 {safeCurrentPage} / {totalPages}
               </span>
@@ -1454,9 +1503,11 @@ export function SubDepartmentsPageClient({ snapshot }: { snapshot: Snapshot }) {
 export function AttendancePageClient({
   snapshot,
   currentUser,
+  totalAttendances,
 }: {
   snapshot: Snapshot;
   currentUser: UserAccount;
+  totalAttendances: number;
 }) {
   return (
     <>
@@ -1471,6 +1522,7 @@ export function AttendancePageClient({
         volunteers={snapshot.volunteers}
         sections={snapshot.sections}
         departments={snapshot.departments}
+        totalAttendances={totalAttendances}
         viewerVolunteerId={currentUser.role === "VOLUNTEER" ? currentUser.volunteerId : undefined}
       />
     </>

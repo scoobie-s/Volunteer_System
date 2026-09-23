@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CirclePlus, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { Button, ConfirmDialog, Input, Select } from "@/components/ui";
 import { pushPortalNotification } from "@/lib/client-notifications";
@@ -1607,6 +1607,7 @@ export function AttendanceModalView({
   volunteers,
   sections,
   departments,
+  totalAttendances,
   viewerVolunteerId,
 }: {
   attendances: Attendance[];
@@ -1614,6 +1615,7 @@ export function AttendanceModalView({
   volunteers: Volunteer[];
   sections: Section[];
   departments: Department[];
+  totalAttendances: number;
   viewerVolunteerId?: string;
 }) {
   const router = useRouter();
@@ -1624,9 +1626,40 @@ export function AttendanceModalView({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [loadedAttendances, setLoadedAttendances] = useState(attendances);
+  const [isPageLoading, setIsPageLoading] = useState(false);
+
+  useEffect(() => {
+    setLoadedAttendances(attendances);
+    setCurrentPage(1);
+  }, [attendances]);
+
+  useEffect(() => {
+    if (currentPage === 1) return;
+    const controller = new AbortController();
+    setIsPageLoading(true);
+    void fetch(`/api/attendance?page=${currentPage}&pageSize=50`, {
+      signal: controller.signal,
+      credentials: "same-origin",
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load attendance.");
+        const payload = (await response.json()) as { items: Attendance[] };
+        setLoadedAttendances(payload.items);
+      })
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setIsRefreshing(false);
+        }
+      })
+      .finally(() => setIsPageLoading(false));
+
+    return () => controller.abort();
+  }, [currentPage]);
 
   const rows = useMemo(() => {
-    return attendances
+    return loadedAttendances
       .map((entry) => {
         const event = events.find((item) => item.id === entry.eventId);
         const volunteer = volunteers.find((item) => item.id === entry.volunteerId);
@@ -1666,7 +1699,7 @@ export function AttendanceModalView({
         );
       })
       .sort((left, right) => right.scannedAt.localeCompare(left.scannedAt));
-  }, [attendances, dateFrom, dateTo, departments, departmentFilter, eventTypeFilter, events, searchTerm, sections, statusFilter, viewerVolunteerId, volunteers]);
+  }, [dateFrom, dateTo, departments, departmentFilter, eventTypeFilter, events, loadedAttendances, searchTerm, sections, statusFilter, viewerVolunteerId, volunteers]);
 
   function exportCsv() {
     const lines = [
@@ -1815,6 +1848,15 @@ export function AttendanceModalView({
             ))}
           </div>
         </div>
+        {totalAttendances > 50 ? (
+          <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
+            <span>Page {currentPage} of {Math.ceil(totalAttendances / 50)}</span>
+            <div className="flex items-center gap-2">
+              <Button type="button" disabled={currentPage === 1 || isPageLoading} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}>Previous</Button>
+              <Button type="button" disabled={currentPage >= Math.ceil(totalAttendances / 50) || isPageLoading} onClick={() => setCurrentPage((page) => Math.min(Math.ceil(totalAttendances / 50), page + 1))}>Next</Button>
+            </div>
+          </div>
+        ) : null}
       </Panel>
     </div>
   );
@@ -3069,5 +3111,3 @@ export function UsersModalView({
     </Panel>
   );
 }
-
-

@@ -4,7 +4,9 @@ import { nanoid } from "nanoid";
 import { hashLoginCode } from "@/lib/credentials";
 import { getMockSnapshot } from "@/lib/mock-data";
 import { prisma } from "@/lib/prisma";
+import { deleteVolunteerPhoto, uploadVolunteerPhoto } from "@/lib/blob";
 import { getPresetPermissionsForUserType } from "@/lib/user-types";
+import type { Prisma } from "@prisma/client";
 import type {
   AccessLog,
   AccessPermission,
@@ -38,11 +40,51 @@ export type Snapshot = {
   users: UserAccount[];
 };
 
+export const SNAPSHOT_COLLECTIONS = [
+  "campuses",
+  "departments",
+  "subDepartments",
+  "sections",
+  "volunteers",
+  "events",
+  "attendances",
+  "accessPoints",
+  "permissions",
+  "accessLogs",
+  "users",
+] as const;
+
+export type SnapshotCollection = (typeof SNAPSHOT_COLLECTIONS)[number];
+
+export type SnapshotOptions = {
+  collections?: readonly SnapshotCollection[];
+  includeAttendances?: boolean;
+  includeAccessLogs?: boolean;
+  volunteerPage?: { page?: number; pageSize?: number; search?: string };
+};
+
+const SNAPSHOT_CACHE_TTL_MS = 5_000;
+
+const globalForData = globalThis as unknown as {
+  snapshotCache?: Map<string, {
+    value: Snapshot;
+    expiresAt: number;
+  }>;
+  snapshotPromises?: Map<string, Promise<Snapshot>>;
+};
+
 function shouldUseMockFallback() {
   return process.env.ALLOW_MOCK_DATA === "true";
 }
 
-async function readDatabaseSnapshot(): Promise<Snapshot> {
+async function readDatabaseSnapshot(options: SnapshotOptions = {}): Promise<Snapshot> {
+  const hasCollection = (collection: SnapshotCollection) =>
+    (!options.collections || options.collections.includes(collection)) &&
+    (collection !== "attendances" || options.includeAttendances !== false) &&
+    (collection !== "accessLogs" || options.includeAccessLogs !== false);
+  const empty = <T>() => Promise.resolve([] as T[]);
+  const includeAttendances = hasCollection("attendances");
+  const includeAccessLogs = hasCollection("accessLogs");
   const [
     campuses,
     departments,
@@ -56,17 +98,21 @@ async function readDatabaseSnapshot(): Promise<Snapshot> {
     accessLogs,
     users,
   ] = await Promise.all([
-    prisma.campus.findMany(),
-    prisma.department.findMany(),
-    prisma.subDepartment.findMany(),
-    prisma.section.findMany(),
-    prisma.volunteer.findMany(),
-    prisma.event.findMany(),
-    prisma.attendance.findMany(),
-    prisma.accessPoint.findMany(),
-    prisma.accessPermission.findMany(),
-    prisma.accessLog.findMany(),
-    prisma.user.findMany(),
+    hasCollection("campuses") ? prisma.campus.findMany() : empty<Awaited<ReturnType<typeof prisma.campus.findMany>>[number]>(),
+    hasCollection("departments") ? prisma.department.findMany() : empty<Awaited<ReturnType<typeof prisma.department.findMany>>[number]>(),
+    hasCollection("subDepartments") ? prisma.subDepartment.findMany() : empty<Awaited<ReturnType<typeof prisma.subDepartment.findMany>>[number]>(),
+    hasCollection("sections") ? prisma.section.findMany() : empty<Awaited<ReturnType<typeof prisma.section.findMany>>[number]>(),
+    hasCollection("volunteers") ? prisma.volunteer.findMany() : empty<Awaited<ReturnType<typeof prisma.volunteer.findMany>>[number]>(),
+    hasCollection("events") ? prisma.event.findMany() : empty<Awaited<ReturnType<typeof prisma.event.findMany>>[number]>(),
+    includeAttendances
+      ? prisma.attendance.findMany()
+      : empty<Awaited<ReturnType<typeof prisma.attendance.findMany>>[number]>(),
+    hasCollection("accessPoints") ? prisma.accessPoint.findMany() : empty<Awaited<ReturnType<typeof prisma.accessPoint.findMany>>[number]>(),
+    hasCollection("permissions") ? prisma.accessPermission.findMany() : empty<Awaited<ReturnType<typeof prisma.accessPermission.findMany>>[number]>(),
+    includeAccessLogs
+      ? prisma.accessLog.findMany()
+      : empty<Awaited<ReturnType<typeof prisma.accessLog.findMany>>[number]>(),
+    hasCollection("users") ? prisma.user.findMany() : empty<Awaited<ReturnType<typeof prisma.user.findMany>>[number]>(),
   ]);
 
   return {
@@ -197,19 +243,54 @@ function mapUser(user: Awaited<ReturnType<typeof prisma.user.findMany>>[number])
   };
 }
 
-export async function getSnapshot(): Promise<Snapshot> {
-  if (!shouldUseMockFallback()) {
-    return readDatabaseSnapshot();
+function getSnapshotCacheKey(options: SnapshotOptions) {
+  const collections = options.collections ? [...options.collections].sort().join(",") : "all";
+  return `${collections}|${options.includeAttendances !== false ? "a1" : "a0"}-${options.includeAccessLogs !== false ? "l1" : "l0"}`;
+}
+
+export async function getSnapshot(options: SnapshotOptions = {}): Promise<Snapshot> {
+  const cacheKey = getSnapshotCacheKey(options);
+  if (!(globalForData.snapshotCache instanceof Map)) {
+    globalForData.snapshotCache = new Map();
+  }
+  globalForData.snapshotPromises ??= new Map();
+
+  const cached = globalForData.snapshotCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
   }
 
+  const pending = globalForData.snapshotPromises.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+
+  const snapshotPromise = (async () => {
+    if (!shouldUseMockFallback()) {
+      return readDatabaseSnapshot(options);
+    }
+
+    try {
+      return await readDatabaseSnapshot(options);
+    } catch (error) {
+      console.warn(
+        "Falling back to mock snapshot for local development.",
+        error instanceof Error ? error.message : error,
+      );
+      return getMockSnapshot();
+    }
+  })();
+  globalForData.snapshotPromises.set(cacheKey, snapshotPromise);
+
   try {
-    return await readDatabaseSnapshot();
-  } catch (error) {
-    console.warn(
-      "Falling back to mock snapshot for local development.",
-      error instanceof Error ? error.message : error,
-    );
-    return getMockSnapshot();
+    const snapshot = await snapshotPromise;
+    globalForData.snapshotCache.set(cacheKey, {
+      value: snapshot,
+      expiresAt: Date.now() + SNAPSHOT_CACHE_TTL_MS,
+    });
+    return snapshot;
+  } finally {
+    globalForData.snapshotPromises.delete(cacheKey);
   }
 }
 
@@ -461,9 +542,16 @@ function filterSnapshotByUser(snapshot: Snapshot, user: UserAccount): Snapshot {
   };
 }
 
-export async function getScopedSnapshot(user: UserAccount): Promise<Snapshot> {
-  const snapshot = await getSnapshot();
-  return filterSnapshotByUser(snapshot, user);
+export async function getScopedSnapshot(user: UserAccount, options: SnapshotOptions = {}): Promise<Snapshot> {
+  const snapshot = await getSnapshot(options);
+  const scopedSnapshot = filterSnapshotByUser(snapshot, user);
+
+  if (options.volunteerPage) {
+    const volunteersPage = await listVolunteersPageForUser(user, options.volunteerPage);
+    scopedSnapshot.volunteers = volunteersPage.items;
+  }
+
+  return scopedSnapshot;
 }
 
 export async function getDashboardData() {
@@ -501,6 +589,153 @@ export async function listVolunteersForUser(user: UserAccount) {
   return (await getScopedSnapshot(user)).volunteers;
 }
 
+async function getVolunteerVisibilityWhere(user: UserAccount): Promise<Prisma.VolunteerWhereInput | undefined> {
+  if (user.role === "SUPER_ADMIN") {
+    return undefined;
+  }
+
+  if (user.role === "VOLUNTEER" && user.volunteerId) {
+    return { id: user.volunteerId };
+  }
+
+  let sectionIds = user.sectionIds.length ? user.sectionIds : user.sectionId ? [user.sectionId] : [];
+
+  if (!sectionIds.length && user.subDepartmentIds.length) {
+    const sections = await prisma.section.findMany({
+      where: { subDepartmentId: { in: user.subDepartmentIds } },
+      select: { id: true },
+    });
+    sectionIds = sections.map((section) => section.id);
+  }
+
+  if (!sectionIds.length && user.departmentIds.length) {
+    const sections = await prisma.section.findMany({
+      where: { subDepartment: { departmentId: { in: user.departmentIds } } },
+      select: { id: true },
+    });
+    sectionIds = sections.map((section) => section.id);
+  }
+
+  if (!sectionIds.length && user.campusIds.length) {
+    const sections = await prisma.section.findMany({
+      where: { subDepartment: { department: { campusId: { in: user.campusIds } } } },
+      select: { id: true },
+    });
+    sectionIds = sections.map((section) => section.id);
+  }
+
+  if (!sectionIds.length) {
+    return user.volunteerId ? { id: user.volunteerId } : { id: "__no_visible_volunteers__" };
+  }
+
+  return {
+    OR: [
+      { sectionId: { in: sectionIds } },
+      { sectionIds: { hasSome: sectionIds } },
+    ],
+  };
+}
+
+export async function listVolunteersPageForUser(
+  user: UserAccount,
+  options: { page?: number; pageSize?: number; search?: string } = {},
+) {
+  const pageSize = Math.min(Math.max(options.pageSize ?? 15, 1), 50);
+  const page = Math.max(options.page ?? 1, 1);
+  const search = options.search?.trim();
+  const visibilityWhere = await getVolunteerVisibilityWhere(user);
+  const searchWhere: Prisma.VolunteerWhereInput | undefined = search
+    ? {
+        OR: [
+          { fullName: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+          { phone: { contains: search, mode: "insensitive" } },
+          { qrToken: { contains: search, mode: "insensitive" } },
+        ],
+      }
+    : undefined;
+  const where: Prisma.VolunteerWhereInput =
+    visibilityWhere && searchWhere
+      ? { AND: [visibilityWhere, searchWhere] }
+      : visibilityWhere ?? searchWhere ?? {};
+
+  const [total, volunteers] = await Promise.all([
+    prisma.volunteer.count({ where }),
+    prisma.volunteer.findMany({
+      where,
+      orderBy: { fullName: "asc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  return {
+    items: volunteers.map(mapVolunteer),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+export async function listAttendancePageForUser(
+  user: UserAccount,
+  options: { page?: number; pageSize?: number } = {},
+) {
+  const pageSize = Math.min(Math.max(options.pageSize ?? 50, 1), 100);
+  const page = Math.max(options.page ?? 1, 1);
+  const visibilityWhere = await getVolunteerVisibilityWhere(user);
+  const where: Prisma.AttendanceWhereInput | undefined = visibilityWhere
+    ? { volunteer: visibilityWhere }
+    : undefined;
+  const [total, attendances] = await Promise.all([
+    prisma.attendance.count({ where }),
+    prisma.attendance.findMany({
+      where,
+      orderBy: { scannedAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  return {
+    items: attendances.map(mapAttendance),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+export async function listAccessLogPageForUser(
+  user: UserAccount,
+  options: { page?: number; pageSize?: number } = {},
+) {
+  const pageSize = Math.min(Math.max(options.pageSize ?? 50, 1), 100);
+  const page = Math.max(options.page ?? 1, 1);
+  const visibilityWhere = await getVolunteerVisibilityWhere(user);
+  const where: Prisma.AccessLogWhereInput | undefined = visibilityWhere
+    ? { volunteer: visibilityWhere }
+    : undefined;
+  const [total, accessLogs] = await Promise.all([
+    prisma.accessLog.count({ where }),
+    prisma.accessLog.findMany({
+      where,
+      orderBy: { scannedAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  return {
+    items: accessLogs.map(mapAccessLog),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
 export async function listEvents() {
   return (await getSnapshot()).events;
 }
@@ -532,6 +767,29 @@ export async function listUsers() {
 export async function findUserAccountById(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      emailVerified: true,
+      image: true,
+      role: true,
+      userType: true,
+      passwordHash: true,
+      volunteerId: true,
+      campusId: true,
+      campusIds: true,
+      departmentId: true,
+      departmentIds: true,
+      subDepartmentId: true,
+      subDepartmentIds: true,
+      sectionId: true,
+      sectionIds: true,
+      pageAccess: true,
+      actionAccess: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
 
   return user ? mapUser(user) : null;
@@ -843,9 +1101,11 @@ export async function createVolunteer(input: Omit<Volunteer, "id" | "qrToken">) 
     "id" | "qrToken"
   > & { departmentIds?: string[]; subDepartmentIds?: string[] };
   const sectionIds = volunteerData.sectionIds.length ? volunteerData.sectionIds : [volunteerData.sectionId];
+  const photoDataUrl = await uploadVolunteerPhoto(volunteerData.photoDataUrl, nanoid(12));
   await prisma.volunteer.create({
     data: {
       ...volunteerData,
+      photoDataUrl,
       email: volunteerData.email.trim() || null,
       sectionId: sectionIds[0],
       sectionIds,
@@ -859,6 +1119,10 @@ export async function createVolunteer(input: Omit<Volunteer, "id" | "qrToken">) 
 }
 
 export async function deleteVolunteer(volunteerId: string) {
+  const volunteer = await prisma.volunteer.findUnique({
+    where: { id: volunteerId },
+    select: { photoDataUrl: true },
+  });
   await prisma.attendance.deleteMany({
     where: { volunteerId },
   });
@@ -871,6 +1135,7 @@ export async function deleteVolunteer(volunteerId: string) {
   await prisma.volunteer.delete({
     where: { id: volunteerId },
   });
+  await deleteVolunteerPhoto(volunteer?.photoDataUrl);
 }
 
 export async function updateVolunteer(
@@ -882,15 +1147,24 @@ export async function updateVolunteer(
     "id" | "qrToken"
   > & { departmentIds?: string[]; subDepartmentIds?: string[] };
   const sectionIds = volunteerData.sectionIds.length ? volunteerData.sectionIds : [volunteerData.sectionId];
+  const previousVolunteer = await prisma.volunteer.findUnique({
+    where: { id: volunteerId },
+    select: { photoDataUrl: true },
+  });
+  const photoDataUrl = await uploadVolunteerPhoto(volunteerData.photoDataUrl, volunteerId);
   await prisma.volunteer.update({
     where: { id: volunteerId },
     data: {
       ...volunteerData,
+      photoDataUrl,
       email: volunteerData.email.trim() || null,
       sectionId: sectionIds[0],
       sectionIds,
     },
   });
+  if (photoDataUrl !== previousVolunteer?.photoDataUrl) {
+    await deleteVolunteerPhoto(previousVolunteer?.photoDataUrl);
+  }
 }
 
 export async function createEvent(input: Omit<Event, "id">) {

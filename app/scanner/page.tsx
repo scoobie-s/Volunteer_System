@@ -5,7 +5,11 @@ import { getScopedSnapshot } from "@/lib/data";
 
 export default async function ScannerPage() {
   const currentUser = await requirePageAccess("Scanner");
-  const snapshot = await getScopedSnapshot(currentUser);
+  const snapshot = await getScopedSnapshot(currentUser, {
+    collections: ["campuses", "departments", "subDepartments", "sections", "events", "accessPoints"],
+    includeAttendances: false,
+    includeAccessLogs: false,
+  });
 
   return (
     <>

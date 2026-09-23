@@ -19,6 +19,18 @@ npm run prisma:generate
 npm run dev
 ```
 
+## Volunteer photo storage
+
+Create a Vercel Blob store and add its read/write token as `BLOB_READ_WRITE_TOKEN` in the local and Vercel production environments. New volunteer photos will then be stored in Blob while the existing volunteer screens continue using the same image field.
+
+After configuring the token, migrate existing database-embedded photos once:
+
+```bash
+npm run migrate:volunteer-photos
+```
+
+Without the token, the app keeps the existing database fallback so local development continues to work.
+
 The app uses PostgreSQL/Neon by default. Mock-mode fallbacks are now opt-in for local development only:
 
 ```bash

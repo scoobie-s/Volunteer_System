@@ -1,4 +1,5 @@
 import { cookies, headers } from "next/headers";
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/better-auth";
@@ -36,7 +37,10 @@ export async function authenticateUserByCode(loginCode: string) {
   }
 
   const users = await prisma.user.findMany({
-    include: {
+    select: {
+      id: true,
+      email: true,
+      passwordHash: true,
       accounts: {
         where: {
           providerId: CREDENTIAL_PROVIDER_ID,
@@ -65,7 +69,7 @@ export async function authenticateUserByCode(loginCode: string) {
   return null;
 }
 
-export async function getAuthenticatedUser() {
+export const getAuthenticatedUser = cache(async function getAuthenticatedUser() {
   const session = await auth.api.getSession({
     headers: await headers(),
   });
@@ -92,7 +96,7 @@ export async function getAuthenticatedUser() {
   }
 
   return findUserAccountById(userId);
-}
+});
 
 export async function requireAuthenticatedUser() {
   const user = await getAuthenticatedUser();

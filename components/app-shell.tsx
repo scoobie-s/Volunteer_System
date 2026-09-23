@@ -373,11 +373,14 @@ export function AppShell({
             const active = pathname === link.href;
 
             return (
-              <button
-                key={link.id}
-                type="button"
-                aria-label={link.label}
-                onClick={canOpenNavHref(currentUser, link.href) ? () => router.push(link.href) : undefined}
+                <button
+                  key={link.id}
+                  type="button"
+                  aria-label={link.label}
+                  onPointerEnter={() => {
+                    if (canOpenNavHref(currentUser, link.href)) router.prefetch(link.href);
+                  }}
+                  onClick={canOpenNavHref(currentUser, link.href) ? () => router.push(link.href) : undefined}
                 disabled={!canOpenNavHref(currentUser, link.href)}
                 className={
                   link.standout
@@ -535,6 +538,7 @@ export function AppShell({
                 <button
                   key={`mobile-sidebar-${link.href}-${link.label}`}
                   type="button"
+                  onPointerEnter={() => router.prefetch(link.href)}
                   onClick={() => {
                       setMobileMenuOpen(false);
                     router.push(link.href);

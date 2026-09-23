@@ -6,6 +6,7 @@ import {
   deleteVolunteer,
   getSnapshot,
   listVolunteersForUser,
+  listVolunteersPageForUser,
   updateVolunteer,
 } from "@/lib/data";
 import { volunteerSchema } from "@/lib/validation";
@@ -69,9 +70,22 @@ async function resolveVolunteerPayload(body: Record<string, unknown>) {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await requireApiPermission("Volunteer Hub", "View");
   if (auth.error) return auth.error;
+
+  const { searchParams } = new URL(request.url);
+  const page = Number(searchParams.get("page"));
+  if (Number.isFinite(page) && page > 0) {
+    return NextResponse.json(
+      await listVolunteersPageForUser(auth.user, {
+        page,
+        pageSize: Number(searchParams.get("pageSize")) || 15,
+        search: searchParams.get("search") ?? "",
+      }),
+    );
+  }
+
   return NextResponse.json(await listVolunteersForUser(auth.user));
 }
 

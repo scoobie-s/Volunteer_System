@@ -4700,6 +4700,7 @@ export function DashboardLauncher({
                   <button
                     key={`drawer-link-${link.href}`}
                     type="button"
+                    onPointerEnter={() => router.prefetch(link.href)}
                     onClick={() => {
                       setMobileMenuOpen(false);
                       router.push(link.href);
