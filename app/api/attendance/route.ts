@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   return NextResponse.json(
     await listAttendancePageForUser(auth.user, {
       page: Number(searchParams.get("page")) || 1,
-      pageSize: Number(searchParams.get("pageSize")) || 50,
+      pageSize: Number(searchParams.get("pageSize")) || 15,
     }),
   );
 }

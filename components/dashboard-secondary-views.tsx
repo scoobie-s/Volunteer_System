@@ -19,6 +19,8 @@ import {
   getUserTypeConfig,
 } from "@/lib/user-types";
 
+const ATTENDANCE_PER_PAGE = 15;
+
 function generateLoginCode() {
   const min = 100000;
   const max = 999999;
@@ -1639,7 +1641,7 @@ export function AttendanceModalView({
     if (currentPage === 1) return;
     const controller = new AbortController();
     setIsPageLoading(true);
-    void fetch(`/api/attendance?page=${currentPage}&pageSize=50`, {
+    void fetch(`/api/attendance?page=${currentPage}&pageSize=${ATTENDANCE_PER_PAGE}`, {
       signal: controller.signal,
       credentials: "same-origin",
     })
@@ -1848,12 +1850,12 @@ export function AttendanceModalView({
             ))}
           </div>
         </div>
-        {totalAttendances > 50 ? (
+        {totalAttendances > ATTENDANCE_PER_PAGE ? (
           <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
-            <span>Page {currentPage} of {Math.ceil(totalAttendances / 50)}</span>
+            <span>Page {currentPage} of {Math.ceil(totalAttendances / ATTENDANCE_PER_PAGE)}</span>
             <div className="flex items-center gap-2">
               <Button type="button" disabled={currentPage === 1 || isPageLoading} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}>Previous</Button>
-              <Button type="button" disabled={currentPage >= Math.ceil(totalAttendances / 50) || isPageLoading} onClick={() => setCurrentPage((page) => Math.min(Math.ceil(totalAttendances / 50), page + 1))}>Next</Button>
+              <Button type="button" disabled={currentPage >= Math.ceil(totalAttendances / ATTENDANCE_PER_PAGE) || isPageLoading} onClick={() => setCurrentPage((page) => Math.min(Math.ceil(totalAttendances / ATTENDANCE_PER_PAGE), page + 1))}>Next</Button>
             </div>
           </div>
         ) : null}

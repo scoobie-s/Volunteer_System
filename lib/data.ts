@@ -61,6 +61,7 @@ export type SnapshotOptions = {
   includeAttendances?: boolean;
   includeAccessLogs?: boolean;
   volunteerPage?: { page?: number; pageSize?: number; search?: string };
+  historySince?: Date;
 };
 
 const SNAPSHOT_CACHE_TTL_MS = 5_000;
@@ -102,15 +103,17 @@ async function readDatabaseSnapshot(options: SnapshotOptions = {}): Promise<Snap
     hasCollection("departments") ? prisma.department.findMany() : empty<Awaited<ReturnType<typeof prisma.department.findMany>>[number]>(),
     hasCollection("subDepartments") ? prisma.subDepartment.findMany() : empty<Awaited<ReturnType<typeof prisma.subDepartment.findMany>>[number]>(),
     hasCollection("sections") ? prisma.section.findMany() : empty<Awaited<ReturnType<typeof prisma.section.findMany>>[number]>(),
-    hasCollection("volunteers") ? prisma.volunteer.findMany() : empty<Awaited<ReturnType<typeof prisma.volunteer.findMany>>[number]>(),
+    hasCollection("volunteers")
+      ? prisma.volunteer.findMany({ omit: { photoDataUrl: true } })
+      : empty<Awaited<ReturnType<typeof prisma.volunteer.findMany>>[number]>(),
     hasCollection("events") ? prisma.event.findMany() : empty<Awaited<ReturnType<typeof prisma.event.findMany>>[number]>(),
     includeAttendances
-      ? prisma.attendance.findMany()
+      ? prisma.attendance.findMany(options.historySince ? { where: { scannedAt: { gte: options.historySince } } } : undefined)
       : empty<Awaited<ReturnType<typeof prisma.attendance.findMany>>[number]>(),
     hasCollection("accessPoints") ? prisma.accessPoint.findMany() : empty<Awaited<ReturnType<typeof prisma.accessPoint.findMany>>[number]>(),
     hasCollection("permissions") ? prisma.accessPermission.findMany() : empty<Awaited<ReturnType<typeof prisma.accessPermission.findMany>>[number]>(),
     includeAccessLogs
-      ? prisma.accessLog.findMany()
+      ? prisma.accessLog.findMany(options.historySince ? { where: { scannedAt: { gte: options.historySince } } } : undefined)
       : empty<Awaited<ReturnType<typeof prisma.accessLog.findMany>>[number]>(),
     hasCollection("users") ? prisma.user.findMany() : empty<Awaited<ReturnType<typeof prisma.user.findMany>>[number]>(),
   ]);
@@ -141,7 +144,11 @@ function mapSection(
   };
 }
 
-function mapVolunteer(volunteer: Awaited<ReturnType<typeof prisma.volunteer.findMany>>[number]): Volunteer {
+function mapVolunteer(
+  volunteer: Omit<Awaited<ReturnType<typeof prisma.volunteer.findMany>>[number], "photoDataUrl"> & {
+    photoDataUrl?: string | null;
+  },
+): Volunteer {
   const sectionIds = Array.isArray(volunteer.sectionIds) ? volunteer.sectionIds : [];
   return {
     ...volunteer,
@@ -245,7 +252,7 @@ function mapUser(user: Awaited<ReturnType<typeof prisma.user.findMany>>[number])
 
 function getSnapshotCacheKey(options: SnapshotOptions) {
   const collections = options.collections ? [...options.collections].sort().join(",") : "all";
-  return `${collections}|${options.includeAttendances !== false ? "a1" : "a0"}-${options.includeAccessLogs !== false ? "l1" : "l0"}`;
+  return `${collections}|${options.includeAttendances !== false ? "a1" : "a0"}-${options.includeAccessLogs !== false ? "l1" : "l0"}-${options.historySince?.toISOString() ?? "all"}`;
 }
 
 export async function getSnapshot(options: SnapshotOptions = {}): Promise<Snapshot> {
@@ -619,6 +626,50 @@ export async function getDashboardSnapshotForUser(user: UserAccount) {
   return { snapshot: scopedSnapshot, accessMetrics: { granted, total } };
 }
 
+// Attendance needs names and team membership to label a page of scan records,
+// but never needs volunteer contact details, notes, or photos.
+export async function getAttendanceSnapshotForUser(user: UserAccount): Promise<Snapshot> {
+  const [campuses, departments, subDepartments, sections, volunteers, events] = await Promise.all([
+    prisma.campus.findMany(),
+    prisma.department.findMany(),
+    prisma.subDepartment.findMany(),
+    prisma.section.findMany(),
+    prisma.volunteer.findMany({
+      select: { id: true, fullName: true, role: true, sectionId: true, sectionIds: true },
+    }),
+    prisma.event.findMany(),
+  ]);
+
+  const snapshot: Snapshot = {
+    campuses,
+    departments,
+    subDepartments,
+    sections: sections.map((section) => mapSection(section, subDepartments)),
+    volunteers: volunteers.map((volunteer) => ({
+      ...volunteer,
+      phone: "",
+      email: "",
+      membershipStatus: "MEMBER",
+      availability: "BOTH",
+      qrToken: "",
+      notes: undefined,
+      pastor: undefined,
+      zone: undefined,
+      campusPhysicalAddress: undefined,
+      photoDataUrl: undefined,
+      accessPointIds: [],
+    })),
+    events: events.map(mapEvent),
+    attendances: [],
+    accessPoints: [],
+    permissions: [],
+    accessLogs: [],
+    users: [],
+  };
+
+  return filterSnapshotByUser(snapshot, user);
+}
+
 export async function getDashboardData() {
   const snapshot = await getSnapshot();
   const today = startOfDay(new Date());
@@ -747,7 +798,7 @@ export async function listAttendancePageForUser(
   user: UserAccount,
   options: { page?: number; pageSize?: number } = {},
 ) {
-  const pageSize = Math.min(Math.max(options.pageSize ?? 50, 1), 100);
+  const pageSize = Math.min(Math.max(options.pageSize ?? 15, 1), 100);
   const page = Math.max(options.page ?? 1, 1);
   const visibilityWhere = await getVolunteerVisibilityWhere(user);
   const where: Prisma.AttendanceWhereInput | undefined = visibilityWhere

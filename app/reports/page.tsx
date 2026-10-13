@@ -3,11 +3,13 @@ import { ModulePageHeader } from "@/components/module-layout";
 import { requirePageAccess } from "@/lib/auth";
 import { getScopedSnapshot } from "@/lib/data";
 import { hasActionAccess } from "@/lib/permissions";
+import { subDays } from "date-fns";
 
 export default async function ReportsPage() {
   const currentUser = await requirePageAccess("Reports");
   const snapshot = await getScopedSnapshot(currentUser, {
     collections: ["campuses", "departments", "subDepartments", "sections", "volunteers", "events", "attendances", "accessPoints", "accessLogs"],
+    historySince: subDays(new Date(), 90),
   });
   return (
     <>
