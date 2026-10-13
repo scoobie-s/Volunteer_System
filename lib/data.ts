@@ -1,7 +1,7 @@
 import { addDays, formatISO, startOfDay, subDays } from "date-fns";
 import { createLocalAccountIssuer } from "@better-auth/core/db";
 import { nanoid } from "nanoid";
-import { hashLoginCode } from "@/lib/credentials";
+import { getLoginCodeLookup, hashLoginCode } from "@/lib/credentials";
 import { getMockSnapshot } from "@/lib/mock-data";
 import { prisma } from "@/lib/prisma";
 import { deleteVolunteerPhoto, uploadVolunteerPhoto } from "@/lib/blob";
@@ -554,6 +554,71 @@ export async function getScopedSnapshot(user: UserAccount, options: SnapshotOpti
   return scopedSnapshot;
 }
 
+// The landing dashboard is rendered on every sign-in.  Keep its payload small:
+// volunteer photos and historical audit rows belong on their dedicated pages,
+// not in the initial React payload.
+export async function getDashboardSnapshotForUser(user: UserAccount) {
+  const since = subDays(startOfDay(new Date()), 90);
+  const [campuses, departments, subDepartments, sections, volunteers, events, attendances, accessPoints] =
+    await Promise.all([
+      prisma.campus.findMany(),
+      prisma.department.findMany(),
+      prisma.subDepartment.findMany(),
+      prisma.section.findMany(),
+      prisma.volunteer.findMany({
+        select: { id: true, fullName: true, role: true, sectionId: true, sectionIds: true },
+      }),
+      prisma.event.findMany(),
+      prisma.attendance.findMany({ where: { scannedAt: { gte: since } } }),
+      prisma.accessPoint.findMany(),
+    ]);
+
+  const snapshot: Snapshot = {
+    campuses,
+    departments,
+    subDepartments,
+    sections: sections.map((section) => mapSection(section, subDepartments)),
+    // DashboardLauncher only uses these fields. Supplying safe defaults preserves
+    // its shared Snapshot contract without serializing profile data or photos.
+    volunteers: volunteers.map((volunteer) => ({
+      ...volunteer,
+      phone: "",
+      email: "",
+      membershipStatus: "MEMBER",
+      availability: "BOTH",
+      qrToken: "",
+      notes: undefined,
+      pastor: undefined,
+      zone: undefined,
+      campusPhysicalAddress: undefined,
+      photoDataUrl: undefined,
+      accessPointIds: [],
+    })),
+    events: events.map(mapEvent),
+    attendances: attendances.map(mapAttendance),
+    accessPoints: accessPoints.map(mapAccessPoint),
+    permissions: [],
+    accessLogs: [],
+    users: [],
+  };
+
+  const scopedSnapshot = filterSnapshotByUser(snapshot, user);
+  const visibleVolunteerIds = scopedSnapshot.volunteers.map((volunteer) => volunteer.id);
+  const accessLogWhere: Prisma.AccessLogWhereInput = {
+    scannedAt: { gte: since },
+    ...(user.role === "SUPER_ADMIN" ? {} : { volunteerId: { in: visibleVolunteerIds } }),
+  };
+  const [accessCounts, recentAccessLogs] = await Promise.all([
+    prisma.accessLog.groupBy({ by: ["status"], where: accessLogWhere, _count: { _all: true } }),
+    prisma.accessLog.findMany({ where: accessLogWhere, orderBy: { scannedAt: "desc" }, take: 8 }),
+  ]);
+  const total = accessCounts.reduce((sum, entry) => sum + entry._count._all, 0);
+  const granted = accessCounts.find((entry) => entry.status === "GRANTED")?._count._all ?? 0;
+  scopedSnapshot.accessLogs = recentAccessLogs.map(mapAccessLog);
+
+  return { snapshot: scopedSnapshot, accessMetrics: { granted, total } };
+}
+
 export async function getDashboardData() {
   const snapshot = await getSnapshot();
   const today = startOfDay(new Date());
@@ -741,7 +806,11 @@ export async function listEvents() {
 }
 
 export async function listEventsForUser(user: UserAccount) {
-  return (await getScopedSnapshot(user)).events;
+  return (await getScopedSnapshot(user, {
+    collections: ["campuses", "departments", "subDepartments", "sections", "events"],
+    includeAttendances: false,
+    includeAccessLogs: false,
+  })).events;
 }
 
 export async function listAccessPoints() {
@@ -749,7 +818,11 @@ export async function listAccessPoints() {
 }
 
 export async function listAccessPointsForUser(user: UserAccount) {
-  return (await getScopedSnapshot(user)).accessPoints;
+  return (await getScopedSnapshot(user, {
+    collections: ["campuses", "departments", "subDepartments", "sections", "accessPoints"],
+    includeAttendances: false,
+    includeAccessLogs: false,
+  })).accessPoints;
 }
 
 export async function listAccessPermissions() {
@@ -757,7 +830,11 @@ export async function listAccessPermissions() {
 }
 
 export async function listAccessPermissionsForUser(user: UserAccount) {
-  return (await getScopedSnapshot(user)).permissions;
+  return (await getScopedSnapshot(user, {
+    collections: ["campuses", "departments", "subDepartments", "sections", "accessPoints", "permissions"],
+    includeAttendances: false,
+    includeAccessLogs: false,
+  })).permissions;
 }
 
 export async function listUsers() {
@@ -776,6 +853,7 @@ export async function findUserAccountById(userId: string) {
       role: true,
       userType: true,
       passwordHash: true,
+      loginCodeLookup: true,
       volunteerId: true,
       campusId: true,
       campusIds: true,
@@ -852,7 +930,11 @@ export async function clearPortalNotifications() {
 }
 
 export async function listUsersForUser(user: UserAccount) {
-  return (await getScopedSnapshot(user)).users;
+  return (await getScopedSnapshot(user, {
+    collections: ["campuses", "departments", "subDepartments", "sections", "volunteers", "users"],
+    includeAttendances: false,
+    includeAccessLogs: false,
+  })).users;
 }
 
 export async function listCampusesForUser(user: UserAccount) {
@@ -1547,6 +1629,7 @@ export async function createUser(input: Omit<UserAccount, "id">) {
       role: input.role,
       userType: input.userType,
       passwordHash,
+      loginCodeLookup: getLoginCodeLookup(input.loginCode),
       volunteerId: input.volunteerId ?? null,
       campusId: input.campusIds[0] ?? input.campusId ?? null,
       campusIds: input.campusIds,
@@ -1579,6 +1662,7 @@ export async function updateUser(userId: string, input: Omit<UserAccount, "id">)
       role: input.role,
       userType: input.userType,
       ...(nextPasswordHash ? { passwordHash: nextPasswordHash } : {}),
+      ...(nextPasswordHash ? { loginCodeLookup: getLoginCodeLookup(input.loginCode.trim()) } : {}),
       volunteerId: input.volunteerId ?? null,
       campusId: input.campusIds[0] ?? input.campusId ?? null,
       campusIds: input.campusIds,

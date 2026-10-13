@@ -70,6 +70,7 @@ model User {
   emailVerified    Boolean             @default(false)
   image            String?
   passwordHash     String?
+  loginCodeLookup  String?
   role             VolunteerRole
   userType         UserType            @default(PLATFORM_ADMIN)
   volunteerId      String?             @unique
@@ -93,6 +94,8 @@ model User {
   sessions         Session[]
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
+
+  @@index([loginCodeLookup])
 }
 
 model PasskeyCredential {
@@ -245,6 +248,9 @@ model Volunteer {
   accessLogs            AccessLog[]
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
+
+  @@index([fullName])
+  @@index([sectionId])
 }
 
 model Event {
@@ -263,6 +269,8 @@ model Event {
   attendances    Attendance[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+
+  @@index([campusId, date])
 }
 
 model Attendance {
@@ -276,6 +284,8 @@ model Attendance {
 
   @@unique([volunteerId, eventId, status])
   @@index([eventId, scannedAt])
+  @@index([volunteerId, scannedAt])
+  @@index([scannedAt])
 }
 
 model AccessPoint {
@@ -317,4 +327,6 @@ model AccessLog {
   scannedAt     DateTime     @default(now())
 
   @@index([accessPointId, scannedAt])
+  @@index([volunteerId, scannedAt])
+  @@index([scannedAt])
 }

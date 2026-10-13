@@ -5,7 +5,6 @@ import {
   createVolunteer,
   deleteVolunteer,
   getSnapshot,
-  listVolunteersForUser,
   listVolunteersPageForUser,
   updateVolunteer,
 } from "@/lib/data";
@@ -75,18 +74,14 @@ export async function GET(request: Request) {
   if (auth.error) return auth.error;
 
   const { searchParams } = new URL(request.url);
-  const page = Number(searchParams.get("page"));
-  if (Number.isFinite(page) && page > 0) {
-    return NextResponse.json(
-      await listVolunteersPageForUser(auth.user, {
-        page,
-        pageSize: Number(searchParams.get("pageSize")) || 15,
-        search: searchParams.get("search") ?? "",
-      }),
-    );
-  }
-
-  return NextResponse.json(await listVolunteersForUser(auth.user));
+  const page = Number(searchParams.get("page")) || 1;
+  return NextResponse.json(
+    await listVolunteersPageForUser(auth.user, {
+      page,
+      pageSize: Number(searchParams.get("pageSize")) || 15,
+      search: searchParams.get("search") ?? "",
+    }),
+  );
 }
 
 export async function POST(request: Request) {

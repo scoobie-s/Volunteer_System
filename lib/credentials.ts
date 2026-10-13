@@ -1,7 +1,14 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 const HASH_PREFIX = "scrypt";
 const KEY_LENGTH = 64;
+
+// Deterministic lookup only; the scrypt hash is still the credential verifier.
+export function getLoginCodeLookup(loginCode: string) {
+  const secret = process.env.LOGIN_CODE_LOOKUP_SECRET ?? process.env.BETTER_AUTH_SECRET ?? process.env.AUTH_SECRET;
+  if (!secret) throw new Error("LOGIN_CODE_LOOKUP_SECRET or BETTER_AUTH_SECRET must be configured.");
+  return createHmac("sha256", secret).update(loginCode).digest("hex");
+}
 
 function deriveKey(loginCode: string, salt: string) {
   return scryptSync(loginCode, salt, KEY_LENGTH).toString("hex");

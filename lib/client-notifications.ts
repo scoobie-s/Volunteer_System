@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { PortalNotification } from "@/lib/types";
 
 const CHANGE_EVENT = "crc-portal-notifications-change";
-const POLL_INTERVAL_MS = 30000;
+const POLL_INTERVAL_MS = 120000;
 
 export function refreshPortalNotifications() {
   if (typeof window === "undefined") {
@@ -81,7 +81,7 @@ export function usePortalNotifications() {
     void loadNotifications();
 
     const interval = window.setInterval(() => {
-      void loadNotifications();
+      if (document.visibilityState === "visible") void loadNotifications();
     }, POLL_INTERVAL_MS);
 
     const handleVisibilityChange = () => {

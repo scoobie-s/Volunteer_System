@@ -3,7 +3,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/better-auth";
-import { verifyLoginCode } from "@/lib/credentials";
+import { getLoginCodeLookup, verifyLoginCode } from "@/lib/credentials";
 import { findUserAccountById, syncCredentialAccountHash } from "@/lib/data";
 import { findMockUserByCode, findMockUserById } from "@/lib/mock-data";
 import { getFirstAccessibleRoute, hasActionAccess, hasPageAccess } from "@/lib/permissions";
@@ -36,20 +36,31 @@ export async function authenticateUserByCode(loginCode: string) {
     }
   }
 
-  const users = await prisma.user.findMany({
-    select: {
-      id: true,
-      email: true,
-      passwordHash: true,
-      accounts: {
-        where: {
-          providerId: CREDENTIAL_PROVIDER_ID,
-        },
-        select: {
-          password: true,
-        },
-      },
+  const selectAuthenticationCandidate = {
+    id: true,
+    passwordHash: true,
+    accounts: {
+      where: { providerId: CREDENTIAL_PROVIDER_ID },
+      select: { password: true },
     },
+  } as const;
+  const lookup = getLoginCodeLookup(loginCode);
+  const indexedUser = await prisma.user.findFirst({
+    where: { loginCodeLookup: lookup },
+    select: selectAuthenticationCandidate,
+  });
+
+  if (indexedUser) {
+    const storedHash = indexedUser.accounts[0]?.password ?? indexedUser.passwordHash ?? "";
+    return storedHash && verifyLoginCode(loginCode, storedHash)
+      ? findUserAccountById(indexedUser.id)
+      : null;
+  }
+
+  // Existing accounts are upgraded after their first successful sign-in.
+  const users = await prisma.user.findMany({
+    where: { loginCodeLookup: null },
+    select: selectAuthenticationCandidate,
   });
 
   for (const user of users) {
@@ -62,6 +73,8 @@ export async function authenticateUserByCode(loginCode: string) {
     if (!accountHash && user.passwordHash) {
       await syncCredentialAccountHash(user.id, user.passwordHash);
     }
+
+    await prisma.user.update({ where: { id: user.id }, data: { loginCodeLookup: lookup } });
 
     return findUserAccountById(user.id);
   }

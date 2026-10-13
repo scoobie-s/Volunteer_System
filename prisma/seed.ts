@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { createLocalAccountIssuer } from "@better-auth/core/db";
-import { hashLoginCode } from "../lib/credentials";
+import { getLoginCodeLookup, hashLoginCode } from "../lib/credentials";
 import { getPresetPermissionsForUserType } from "../lib/user-types";
 
 const prisma = new PrismaClient();
@@ -175,6 +175,7 @@ async function main() {
       email: "admin@crc.local",
       emailVerified: true,
       passwordHash: hashLoginCode("1234"),
+      loginCodeLookup: getLoginCodeLookup("1234"),
       role: "SUPER_ADMIN",
       userType: "SUPER_ADMIN",
       campusId: campus.id,
@@ -197,6 +198,7 @@ async function main() {
       email: ayanda.email,
       emailVerified: true,
       passwordHash: hashLoginCode("2468"),
+      loginCodeLookup: getLoginCodeLookup("2468"),
       role: "SECTION_LEADER",
       userType: "SECTION_COORDINATOR",
       volunteerId: ayanda.id,
@@ -219,6 +221,7 @@ async function main() {
       email: "platform-admin@crc.local",
       emailVerified: true,
       passwordHash: hashLoginCode("1357"),
+      loginCodeLookup: getLoginCodeLookup("1357"),
       role: "ADMIN",
       userType: "PLATFORM_ADMIN",
       campusId: campus.id,

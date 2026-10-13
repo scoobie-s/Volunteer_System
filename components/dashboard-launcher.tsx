@@ -3418,9 +3418,11 @@ function CampusesView({
 export function DashboardLauncher({
   snapshot,
   currentUser,
+  accessMetrics,
 }: {
   snapshot: Snapshot;
   currentUser: UserAccount;
+  accessMetrics: { granted: number; total: number };
 }) {
   const router = useRouter();
   const notifications = usePortalNotifications();
@@ -3618,8 +3620,8 @@ export function DashboardLauncher({
   const activeVolunteerDelta = activeVolunteerCount - previousActiveVolunteerCount;
   const inactiveVolunteerCount = Math.max(volunteers.length - activeVolunteerCount, 0);
   const activeAccessPoints = accessPoints.filter((point) => point.isActive).length;
-  const accessGrantRate = accessLogs.length
-    ? Math.round((accessLogs.filter((log) => log.status === "GRANTED").length / accessLogs.length) * 100)
+  const accessGrantRate = accessMetrics.total
+    ? Math.round((accessMetrics.granted / accessMetrics.total) * 100)
     : 0;
   const linePoints = buildPolylinePoints(weekSeries.map((entry) => entry.count));
   const currentHour = now.getHours();
