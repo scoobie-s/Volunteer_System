@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getVolunteerPhotoSrc } from "@/lib/volunteer-photo";
 import {
   Bell,
   CirclePlus,
@@ -1386,7 +1387,7 @@ export function VolunteerHubView({
                     {editForm.photoDataUrl ? (
                       <div className="relative h-44 w-full overflow-hidden rounded-[16px] border border-white/70 shadow-[0_10px_24px_rgba(15,23,42,0.14)]">
                         <Image
-                          src={editForm.photoDataUrl}
+                          src={getVolunteerPhotoSrc(editForm.photoDataUrl)}
                           alt={`${editingVolunteer.fullName} profile picture`}
                           fill
                           unoptimized

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Scanner, type IScannerError } from "@yudiel/react-qr-scanner";
 import { Camera, RefreshCw, ScanQrCode, SwitchCamera } from "lucide-react";
 import { Button, Input, Select } from "@/components/ui";
+import { getVolunteerPhotoSrc } from "@/lib/volunteer-photo";
 import type { AccessPoint, Event } from "@/lib/types";
 
 type Result = {
@@ -588,7 +589,7 @@ export function ScannerClient({
                 {result.volunteer.photoDataUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={result.volunteer.photoDataUrl}
+                    src={getVolunteerPhotoSrc(result.volunteer.photoDataUrl)}
                     alt={result.volunteer.fullName}
                     className="h-full w-full object-cover"
                   />
@@ -750,7 +751,7 @@ export function ScannerClient({
                 {result.volunteer.photoDataUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={result.volunteer.photoDataUrl}
+                    src={getVolunteerPhotoSrc(result.volunteer.photoDataUrl)}
                     alt={result.volunteer.fullName}
                     className="h-full w-full object-cover"
                   />

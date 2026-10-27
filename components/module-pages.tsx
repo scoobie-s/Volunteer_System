@@ -16,6 +16,7 @@ import { AccessPointForm, EventForm } from "@/components/forms";
 import { ModulePageHeader, ModuleStack } from "@/components/module-layout";
 import { Button, Card, Chip, ConfirmDialog, Input, Label, Select } from "@/components/ui";
 import { pushPortalNotification } from "@/lib/client-notifications";
+import { getVolunteerPhotoSrc } from "@/lib/volunteer-photo";
 import type { Snapshot } from "@/lib/data";
 import { formatEnum } from "@/lib/utils";
 import type { Campus, UserAccount, Volunteer } from "@/lib/types";
@@ -142,7 +143,7 @@ function VolunteerProfileModal({
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-4">
             {volunteer.photoDataUrl ? (
-              <Image src={volunteer.photoDataUrl} alt={`${volunteer.fullName} profile`} width={80} height={80} unoptimized className="h-20 w-20 rounded-[20px] object-cover" />
+              <Image src={getVolunteerPhotoSrc(volunteer.photoDataUrl)} alt={`${volunteer.fullName} profile`} width={80} height={80} unoptimized className="h-20 w-20 rounded-[20px] object-cover" />
             ) : (
               <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[20px] border border-slate-200 bg-white text-2xl font-semibold text-slate-400">
                 {getInitials(volunteer.fullName)}
@@ -650,7 +651,7 @@ export function VolunteersPageClient({
                         <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-[20px] border border-slate-200 bg-slate-50">
                           {volunteer.photoDataUrl ? (
                             <Image
-                              src={volunteer.photoDataUrl}
+                              src={getVolunteerPhotoSrc(volunteer.photoDataUrl)}
                               alt={`${volunteer.fullName} profile`}
                               width={80}
                               height={80}
@@ -1063,7 +1064,7 @@ export function VolunteersPageClient({
                 {form.photoDataUrl ? (
                   <div className="relative h-44 w-full overflow-hidden rounded-[18px] border border-slate-200">
                     <Image
-                      src={form.photoDataUrl}
+                      src={getVolunteerPhotoSrc(form.photoDataUrl)}
                       alt={`${form.fullName || "Volunteer"} profile`}
                       fill
                       unoptimized

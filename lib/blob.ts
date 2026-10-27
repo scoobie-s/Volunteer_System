@@ -1,6 +1,7 @@
-import { del, put } from "@vercel/blob";
+import { del, get, put } from "@vercel/blob";
 
 const DATA_IMAGE_PREFIX = "data:image/";
+const blobAccess = process.env.BLOB_ACCESS === "public" ? "public" : "private";
 
 function getBlobExtension(contentType: string) {
   const extension = contentType.split("/")[1]?.split(";")[0]?.toLowerCase();
@@ -33,12 +34,16 @@ export async function uploadVolunteerPhoto(photoDataUrl: string | undefined, key
   }
 
   const blob = await put(`volunteers/${key}.${getBlobExtension(contentType)}`, image, {
-    access: "public",
+    access: blobAccess,
     addRandomSuffix: true,
     contentType,
   });
 
   return blob.url;
+}
+
+export async function getVolunteerPhoto(photoUrl: string) {
+  return get(photoUrl, { access: blobAccess });
 }
 
 export async function deleteVolunteerPhoto(photoUrl: string | null | undefined) {

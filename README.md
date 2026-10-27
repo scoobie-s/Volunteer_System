@@ -21,7 +21,9 @@ npm run dev
 
 ## Volunteer photo storage
 
-Create a Vercel Blob store and add its read/write token as `BLOB_READ_WRITE_TOKEN` in the local and Vercel production environments. New volunteer photos will then be stored in Blob while the existing volunteer screens continue using the same image field.
+Create a Vercel Blob store and add its read/write token as `BLOB_READ_WRITE_TOKEN` in the local and Vercel production environments. New volunteer photos are stored privately by default and displayed through an authenticated application route. This matches Vercel Blob stores configured for private access.
+
+If you instead use a public Blob store, set `BLOB_ACCESS=public`. Do not set that variable for a private store.
 
 After configuring the token, migrate existing database-embedded photos once:
 
